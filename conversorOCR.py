@@ -1,12 +1,6 @@
 import pytesseract
 from pdf2image import convert_from_path
 import pandas as pd
-import re
-
-import pytesseract
-from pdf2image import convert_from_path
-import pandas as pd
-import re
 import os
 
 # Caminho do executável do Tesseract
@@ -25,24 +19,25 @@ poppler_path = r"C:\Program Files\poppler-25.07.0\Library\bin"
 # === 1. Converter PDF em imagens ===
 pages = convert_from_path(pdf_path, dpi=300, poppler_path=poppler_path)
 
-dados_tabelas = []
+all_data = []
 
-# === 2. Extrair texto com OCR página por página ===
-for i, page in enumerate(pages):
-    texto = pytesseract.image_to_string(page, lang="por")
+# === 2. Extrair texto com OCR usando image_to_data ===
+for page in pages:
+    data = pytesseract.image_to_data(page, lang="por", output_type=pytesseract.Output.DATAFRAME)
     
-    # === 3. Transformar em linhas ===
-    linhas = texto.strip().split("\n")
-    linhas = [l for l in linhas if l.strip() != ""]  # remove linhas vazias
+    # Remove linhas sem texto
+    data = data[data.text.notna() & (data.text.str.strip() != "")]
     
-    # Tentativa de separar colunas por múltiplos espaços ou tabulação
-    linhas_processadas = [re.split(r"\s{2,}|\t", l) for l in linhas]
+    # Agrupar palavras por linha (usando número da linha na imagem)
+    grouped = data.groupby("line_num")["text"].apply(lambda x: " ".join(x))
     
-    # Guardar em lista
-    dados_tabelas.extend(linhas_processadas)
+    all_data.extend(grouped.tolist())
+
+# === 3. Criar DataFrame para exportar ===
+# Aqui cada linha será uma linha no Excel; ainda não separa colunas perfeitamente
+df = pd.DataFrame(all_data, columns=["Linha"])
 
 # === 4. Exportar para Excel ===
-df = pd.DataFrame(dados_tabelas)
-df.to_excel(output_path, index=False, header=False)
+df.to_excel(output_path, index=False)
 
 print(f"✅ Conversão concluída! Arquivo salvo em: {output_path}")
