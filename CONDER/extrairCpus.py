@@ -1,3 +1,5 @@
+# Programa para extrair composições de preços unitários de serviços de engenharia de um PDF modelo CONDER/BA e exportá-las para CSV.
+
 import re
 import csv
 import pdfplumber
