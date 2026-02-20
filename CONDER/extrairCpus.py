@@ -161,7 +161,7 @@ with pdfplumber.open(caminhoPdf) as pdf:
                 })
 
 # Cria um arquivo csv em modo de escrita
-with open(caminhoCsv, "w", newline="", encoding="utf-8") as f:
+with open(caminhoCsv, "w", newline="", encoding="utf-8-sig") as f:
     fieldnames = [
         "cod_composicao", "tipo", "cod_item",
         "descricao", "unidade", "coeficiente",
