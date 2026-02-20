@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from openpyxl import Workbook
 from openpyxl.worksheet.worksheet import Worksheet
 from pathlib import Path
+import sys
 
 from ExcelLoader import ExcelLoader
 
@@ -43,9 +44,12 @@ class Planilha(ABC):
         self._wb_orig: Workbook | None = None
         self._ws_orig: Worksheet | None = None
 
+        self._last_row: int = 0
+
     def open_workbooks(self) -> None:
         self._wb_orig = ExcelLoader.load_workbook(self._path, self._wb_orig_name)
         self._ws_orig = ExcelLoader.load_worksheet(self._wb_orig, self._ws_orig_name)
+        self._last_row = self._get_last_row_in_column(self._ws_orig, "J")
 
     # Importa os dados da pasta de trabalho de origem para a de destino
     @abstractmethod
@@ -70,3 +74,35 @@ class Planilha(ABC):
                 return row
             
         return 0
+
+    def ajust_layout(self, path_name: str, ws_dest_name: str) -> None:
+
+        if not sys.platform.startswith("win"):
+            return
+
+        import xlwings as xw
+
+        # Abre o Excel via xlwings
+        app = xw.App(visible=False) # Não mostra a janela
+        
+        try:
+            wb = xw.Book(path_name)
+            ws = wb.sheets[ws_dest_name]
+
+            # Autoajusta colunas e linhas
+            ws.autofit()
+            ws.range("A:A").column_width = 10
+            ws.range("D:D").column_width = 65
+
+            # Ajustar largura da coluna Descrição para 65
+
+            # Define a área de impressão
+            last_row = self._last_row + 10
+            last_col = ws.api.Cells(6, ws.api.Columns.Count).End(xw.constants.Direction.xlToLeft).Column
+            ws.api.PageSetup.PrintArea = ws.range((4,1), (last_row, last_col)).api.Address
+
+            wb.save()
+            wb.close()
+        
+        finally:
+            app.quit()
