@@ -202,7 +202,7 @@ def processar_pdf(caminho_pdf, caminho_csv):
                         # Ainda é continuação do cabeçalho
                         cabecalho_pendente["descricao"] = juntar_linhas_descricao(
                             cabecalho_pendente["descricao"],
-                            linha_sem_codigo_tmp
+                            linha_norm # <--- CORRIGIDO: Usa a linha inteira, preservando o número
                         )
                         cabecalho_pendente["linha"] = juntar_linhas_descricao(
                             cabecalho_pendente["linha"],
