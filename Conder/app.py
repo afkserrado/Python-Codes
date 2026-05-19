@@ -1,187 +1,107 @@
-# Programa para extrair composições de preços unitários de serviços de engenharia de um PDF modelo CONDER/BA e exportá-las para CSV.
-
-import re
-import csv
-import pdfplumber
-from tkinter import Tk, filedialog, messagebox
 import os
+import threading
+from tkinter import Tk, filedialog, messagebox
 
-root = Tk() # Cria a janela raiz (root do window), que funciona como o nó raiz de uma hierarquia de widgets
-root.withdraw() # Esconde a janela raiz do tk
+# Importa a janela de espera (barra de progresso)
+from ui.wait_window import WaitWindow
 
-# Abre uma janela de seleção de arquivo
-caminhoPdf = filedialog.askopenfilename(
+# Importa a função responsável por processar o PDF e gerar o CSV
+from services.parser_conder import processar_pdf
+
+
+# Cria a janela raiz do Tkinter
+root = Tk()
+
+# Esconde a janela principal, deixando apenas os diálogos aparecerem
+root.withdraw()
+
+# Variáveis usadas para informar se o processamento deu certo
+# ou se ocorreu algum erro durante a execução da thread
+erro_processamento = None
+processamento_ok = False
+
+
+# Abre a janela de seleção de arquivo
+# O usuário deve escolher um PDF para ser processado
+caminho_pdf = filedialog.askopenfilename(
     title="Selecione um arquivo",
     filetypes=[("PDF", "*.pdf"), ("Todos arquivos", "*.*")]
 )
 
-if not caminhoPdf:
+
+# Se o usuário cancelar a seleção, exibe aviso e encerra o programa
+if not caminho_pdf:
     messagebox.showinfo("Cancelado", "Nenhum arquivo foi selecionado.")
     root.destroy()
     raise SystemExit
 
-caminhoDir = os.path.dirname(caminhoPdf)
-caminhoCsv = os.path.join(caminhoDir, "composicoes.csv")
 
-#print("Caminho selecionado:" + caminhoPdf)
+# Cria e exibe a janela de aguarde
+wait = WaitWindow(root)
+wait.show()
 
-# Regex para detectar código no início (após espaços)
-re_cod_hifen = re.compile(r"^\s*(\d{2}-\d{2}-\d{2}-\d{3})\b") # NN-NN-NN-NNN
-re_cod_num   = re.compile(r"^\s*(\d{4,6})\b") # NNNN a NNNNNN
-re_cod_I     = re.compile(r"^\s*(I\d+)\b") #IN... (começa com a letra 'I', seguido de um ou mais dígitos)
 
-# Regex para detectar as "colunas" da linha de itens
-num_ptbr = r"\d+(?:\.\d{3})*,\d+"
-re_item_campos = re.compile(
-    rf"^(?P<descricao>.+?)\s+"
-    rf"(?P<coef>{num_ptbr})\s+"
-    rf"(?P<preco_unit>{num_ptbr})\s+"
-    rf"(?P<preco_total>{num_ptbr})$"
-)
+# Obtém a pasta do PDF selecionado
+caminho_dir = os.path.dirname(caminho_pdf)
 
-# Linhas “lixo” (informações fixas do PDF)
-lixo_contains = (
-    "Encargos Sociais Não Desonerada:",
-    "COMPOSIÇÃO ANALÍTICA",
-    "Hora",
-    "BDI:",
-    "Projeto:",
-    "Ref.:",
-    "TEIXEIRA DE FREITAS - BA",
-    "CÓDIGO",
-    "Sub Total"
-)
+# Monta o caminho do CSV de saída na mesma pasta do PDF
+caminho_csv = os.path.join(caminho_dir, "composicoes.csv")
 
-registros = [] # Itens extraídos (lista de dicionários)
-comp_atual = None # Código da composição atual (None = fora de composição)
 
-# Abre o pdf
-with pdfplumber.open(caminhoPdf) as pdf:
-    
-    # Percorre as páginas do pdf
-    for page in pdf.pages:
-        
-        # Obtém o texto da página atual
-        texto = page.extract_text()
-        if not texto:
-            continue
+def tarefa():
+    """
+    Função executada em uma thread separada.
+    Ela chama o parser do PDF e registra se deu certo ou se houve erro.
+    """
+    global erro_processamento, processamento_ok
 
-        # Percorre as linhas do texto atual
-        for linha in texto.splitlines():
-            # Remove as quebras de linha do lado direito da linha
-            linha = linha.rstrip("\n")
+    try:
+        # Processa o PDF e gera o CSV
+        processar_pdf(caminho_pdf, caminho_csv)
 
-            # 1) Normalização
-                # Remove espaços no início e no fim da linha
-                # Elimina sequência de whitespaces (espaços, tabs, quebras de linha etc.) e cria uma lista sem elementos vazios
-                # Troca múltiplos espaços/tabs por um único espaço entre as palavras
-            linha_norm = " ".join(linha.split())
+        # Marca que o processamento terminou com sucesso
+        processamento_ok = True
 
-            # 2) Linhas ignoradas
+    except Exception as e:
+        # Guarda a mensagem de erro para ser exibida depois na interface
+        erro_processamento = str(e)
 
-            # Pula linhas vazias e cabeçalhos
-            if not linha_norm:
-                continue
 
-            # Verifica se a linha normalizada contém algum lixo
-            # Se tiver lixo, pula a linha
-            if any(t in linha_norm for t in lixo_contains):
-                continue
+def verificar_fim():
+    """
+    Verifica periodicamente se a thread ainda está rodando.
+    Se a thread terminou, fecha a janela de aguarde e mostra o resultado.
+    """
+    # Se a thread ainda estiver em execução,
+    # agenda uma nova verificação daqui a 100 ms
+    if thread.is_alive():
+        root.after(100, verificar_fim)
 
-            if linha_norm in ("Insumos", "Composição Auxiliar"):
-                continue
+    else:
+        # Fecha a janela de aguarde
+        wait.close()
 
-            # Detecta o fim da composição
-            if "Total" in linha_norm:
-                comp_atual = None
+        # Se houve erro, mostra uma mensagem de erro
+        if erro_processamento:
+            messagebox.showerror("Erro", f"Ocorreu um erro:\n{erro_processamento}")
 
-                # Adiciona uma linha em branco no CSV para separar composições
-                registros.append({
-                    "cod_composicao": "",
-                    "tipo": "",
-                    "cod_item": "",
-                    "descricao": "",
-                    "unidade": "",
-                    "coeficiente": "",
-                    "preco_unitario": "",
-                    "preco_total": "",
-                    "linha": ""
-                })
+        # Se terminou com sucesso, mostra a mensagem final
+        elif processamento_ok:
+            messagebox.showinfo("Concluído", f"CSV gerado em:\n{caminho_csv}")
 
-                continue
+        # Encerra a aplicação
+        root.destroy()
 
-            # Verifica se a linha começa com um código de CPU/insumo
-            m_hifen = re_cod_hifen.match(linha)
-            m_num   = re_cod_num.match(linha)
-            m_i     = re_cod_I.match(linha)
 
-            # Ignora linhas que não começam com código de CPU/insumo
-            if not (m_hifen or m_num or m_i):
-                continue
+# Cria uma thread para executar a função tarefa()
+# Isso evita travar a interface durante o processamento do PDF
+thread = threading.Thread(target=tarefa)
 
-            # 3) Linhas buscadas
+# Inicia a execução da thread
+thread.start()
 
-            # Título da composição
-            if comp_atual is None and not m_i: 
-                # Obtém o código da linha
-                comp_atual = (m_hifen or m_num).group(1)
+# Inicia a checagem periódica para saber quando a thread termina
+verificar_fim()
 
-                # Guarda a linha atual
-                registros.append({
-                    "cod_composicao": comp_atual,
-                    "tipo": "CABECALHO",
-                    "linha": linha.strip(), 
-                })
-
-                continue
-
-            # Itens da composição
-            if comp_atual is not None:
-                # Obtém o código da linha
-                codigo_item = (m_hifen or m_num or m_i).group(1)
-
-                m = re_item_campos.match(linha_norm)
-
-                if m:
-                    descricao = m.group("descricao")
-                    coef = m.group("coef")
-                    preco_unit = m.group("preco_unit")
-                    preco_total = m.group("preco_total")
-                else:
-                    # fallback: não conseguiu separar, guarda a linha inteira
-                    descricao = linha_norm
-                    coef = preco_unit = preco_total = ""
-
-                # Guarda a linha atual
-                registros.append({
-                    "cod_composicao": comp_atual,
-                    "tipo": "ITEM",
-                    "cod_item": codigo_item,
-                    "descricao": descricao,
-                    "unidade": "",
-                    "coeficiente": coef,
-                    "preco_unitario": preco_unit,
-                    "preco_total": preco_total,
-                    "linha": linha.strip(), 
-                })
-
-# Cria um arquivo csv em modo de escrita
-with open(caminhoCsv, "w", newline="", encoding="utf-8-sig") as f:
-    fieldnames = [
-        "cod_composicao", "tipo", "cod_item",
-        "descricao", "unidade", "coeficiente",
-        "preco_unitario", "preco_total",
-        "linha"
-    ]
-
-    # Define o escritor de um arquivo, as colunas e a ordem delas
-    w = csv.DictWriter(f, fieldnames=fieldnames, delimiter="|")
-
-    # Escreve o cabeçalho na primeira linha do csv, com os campos definidos em fieldnames
-    w.writeheader()
-
-    # Escreve as linhas
-    w.writerows(registros)
-
-# Mensagem de confirmação
-messagebox.showinfo("Concluído", f"CSV gerado em:\n{caminhoCsv}")
+# Inicia o loop principal do Tkinter
+root.mainloop()
